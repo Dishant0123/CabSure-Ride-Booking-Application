@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     refresh_token_days: int = 30
     otp_expiry_minutes: int = 10
     firebase_credentials_path: str | None = None
-    google_maps_api_key: str | None = None
+    admin_bootstrap_email: str | None = None
+    admin_bootstrap_password: str | None = None
+    admin_bootstrap_name: str = 'CabSure Operations Admin'
+    admin_bootstrap_role: str = 'super_admin'
+    geoapify_api_key: str | None = None
+    maps_contact_email: str = 'studentdishant123@gmail.com'
 
     model_config = SettingsConfigDict(env_file=BACKEND_ROOT / '.env', extra='ignore')
 

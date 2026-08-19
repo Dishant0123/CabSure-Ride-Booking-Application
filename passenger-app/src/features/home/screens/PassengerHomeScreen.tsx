@@ -33,6 +33,11 @@ type PassengerHomeScreenProps = {
   onEditSavedPlace: (place: SavedPlace) => void;
   onContinueToFare: (categoryId: number) => void;
   onMenuNavigate: (destination: DrawerDestination) => void;
+  onBookInstantRide: () => void;
+  onBookOutstation: () => void;
+  onOpenNotifications: () => void;
+  activeRideId?: number | null;
+  onResumeRide?: () => void;
 };
 
 /** Passenger home */
@@ -45,6 +50,11 @@ export function PassengerHomeScreen({
   onEditSavedPlace,
   onContinueToFare,
   onMenuNavigate,
+  onBookInstantRide,
+  onBookOutstation,
+  onOpenNotifications,
+  activeRideId,
+  onResumeRide,
 }: PassengerHomeScreenProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
@@ -89,7 +99,7 @@ export function PassengerHomeScreen({
             </View>
           </View>
           <View style={styles.headerActions}>
-            <HeaderAction icon="bell-outline" onPress={() => onMenuNavigate('support')} />
+            <HeaderAction icon="bell-outline" onPress={onOpenNotifications} />
             <HeaderAction icon="menu" onPress={() => setMenuVisible(true)} />
           </View>
         </View>
@@ -99,6 +109,7 @@ export function PassengerHomeScreen({
           onPickupPress={onSelectPickup}
           pickup={pickup}
         />
+        {activeRideId ? <Pressable accessibilityRole="button" onPress={onResumeRide}><DsCard elevated style={styles.activeRide}><View style={styles.safetyIcon}><MaterialCommunityIcons color={colors.primary} name="navigation-variant" size={28}/></View><View style={styles.safetyCopy}><DsText color={colors.primary} variant="bodyMedium">Continue active ride #{activeRideId}</DsText><DsText color={colors.textSecondary} variant="caption">Return to live Driver tracking and ride controls.</DsText></View><MaterialCommunityIcons color={colors.primary} name="chevron-right" size={24}/></DsCard></Pressable> : null}
         <SectionTitle action="Manage" onAction={() => onMenuNavigate('addresses')} title="Saved places" />
         <DsCard elevated style={styles.savedPlaces}>
           {['Home', 'Work'].map((label) => (
@@ -132,18 +143,31 @@ export function PassengerHomeScreen({
             onPress={() => onContinueToFare(selectedCategoryId)}
           />
         )}
-        <Pressable accessibilityRole="button" onPress={() => onMenuNavigate('emergency')}>
+        <Pressable accessibilityHint="Opens customer support for a manual ride booking" accessibilityLabel="Book instant ride" accessibilityRole="button" onPress={onBookInstantRide}>
         <DsCard elevated style={styles.safetyCard}>
           <View style={styles.safetyIcon}>
-            <MaterialCommunityIcons color={colors.primary} name="shield-check" size={28} />
+            <MaterialCommunityIcons color={colors.primary} name="phone-in-talk-outline" size={28} />
           </View>
           <View style={styles.safetyCopy}>
-            <DsText variant="bodyMedium">Safe rides, trusted drivers</DsText>
+            <DsText variant="bodyMedium">Book instant ride</DsText>
             <DsText color={colors.textTertiary} variant="caption">
-              Your safety is our top priority. Ride details stay visible before you confirm.
+              Call CabSure Support to arrange a ride with our team.
             </DsText>
           </View>
+          <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={24} />
         </DsCard>
+        </Pressable>
+        <Pressable accessibilityHint="Opens the future long-distance booking form" accessibilityLabel="Book outstation ride" accessibilityRole="button" onPress={onBookOutstation}>
+          <DsCard elevated style={styles.safetyCard}>
+            <View style={styles.safetyIcon}>
+              <MaterialCommunityIcons color={colors.primary} name="road-variant" size={28} />
+            </View>
+            <View style={styles.safetyCopy}>
+              <DsText variant="bodyMedium">Outstation ride booking</DsText>
+              <DsText color={colors.textTertiary} variant="caption">Schedule travel beyond 150 km. Support confirms fare and driver.</DsText>
+            </View>
+            <MaterialCommunityIcons color={colors.primary} name="chevron-right" size={24} />
+          </DsCard>
         </Pressable>
         <SectionTitle action="See all" onAction={() => onMenuNavigate('rides')} title="Recent rides" />
         <View style={styles.recentList}>
@@ -278,6 +302,7 @@ const styles = StyleSheet.create({
   savedPlaces: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md },
   rideRow: { flexDirection: 'row', gap: spacing.md },
   safetyCard: { alignItems: 'center', flexDirection: 'row', gap: spacing.md, padding: spacing.md },
+  activeRide: { alignItems: 'center', backgroundColor: colors.primarySoft, borderColor: colors.primary, borderWidth: 1, flexDirection: 'row', gap: spacing.md, padding: spacing.md },
   safetyCopy: { flex: 1, gap: spacing.xxs },
   safetyIcon: {
     alignItems: 'center',

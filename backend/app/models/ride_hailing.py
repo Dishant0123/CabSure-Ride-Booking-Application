@@ -36,6 +36,7 @@ class Driver(TimestampedModel, Base):
     profile_photo_url: Mapped[str | None] = mapped_column(String(2048))
     rating_average: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal('0.00'), nullable=False)
     completed_rides_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_online: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -69,8 +70,12 @@ class DriverDocument(TimestampedModel, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     driver_id: Mapped[int] = mapped_column(ForeignKey('drivers.id', ondelete='CASCADE'), nullable=False)
     document_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    document_number: Mapped[str] = mapped_column(String(128), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     verification_status: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[str | None] = mapped_column(String(128))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -129,7 +134,7 @@ class RideCategory(TimestampedModel, Base):
 
 class Ride(TimestampedModel, Base):
     __tablename__ = 'rides'
-    __table_args__ = (CheckConstraint("status IN ('requested', 'searching', 'driver_assigned', 'driver_arriving', 'in_progress', 'completed', 'cancelled')", name='ck_rides_status'), Index('ix_rides_passenger_requested', 'passenger_id', 'requested_at'), Index('ix_rides_driver_status_requested', 'driver_id', 'status', 'requested_at'))
+    __table_args__ = (CheckConstraint("status IN ('requested', 'searching', 'driver_assigned', 'driver_arriving', 'driver_arrived', 'in_progress', 'completed', 'cancelled')", name='ck_rides_status'), Index('ix_rides_passenger_requested', 'passenger_id', 'requested_at'), Index('ix_rides_driver_status_requested', 'driver_id', 'status', 'requested_at'))
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     passenger_id: Mapped[int] = mapped_column(ForeignKey('passengers.id', ondelete='RESTRICT'), nullable=False)
     driver_id: Mapped[int | None] = mapped_column(ForeignKey('drivers.id', ondelete='RESTRICT'))
@@ -151,10 +156,12 @@ class Ride(TimestampedModel, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancellation_reason: Mapped[str | None] = mapped_column(String(255))
+    cancelled_by: Mapped[str | None] = mapped_column(String(20))
     estimated_distance_meters: Mapped[int | None] = mapped_column(Integer)
     estimated_duration_seconds: Mapped[int | None] = mapped_column(Integer)
     final_distance_meters: Mapped[int | None] = mapped_column(Integer)
     final_duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    route_geojson: Mapped[dict | None] = mapped_column(JSON)
 
 
 class RideStop(TimestampedModel, Base):
@@ -179,6 +186,21 @@ class RideEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict | None] = mapped_column(JSON)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class RideDispatchOffer(Base):
+    __tablename__ = 'ride_dispatch_offers'
+    __table_args__ = (
+        UniqueConstraint('ride_id', 'driver_id', name='uq_ride_dispatch_offer_driver'),
+        Index('ix_ride_dispatch_offers_driver_status_expires', 'driver_id', 'status', 'expires_at'),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ride_id: Mapped[int] = mapped_column(ForeignKey('rides.id', ondelete='CASCADE'), nullable=False)
+    driver_id: Mapped[int] = mapped_column(ForeignKey('drivers.id', ondelete='CASCADE'), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FareQuote(TimestampedModel, Base):
@@ -244,6 +266,8 @@ class DriverCurrentLocation(Base):
     latitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
     longitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
     heading_degrees: Mapped[int | None] = mapped_column(Integer)
+    accuracy_meters: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+    speed_mps: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
 
 
@@ -269,6 +293,43 @@ class SupportTicket(TimestampedModel, Base):
     status: Mapped[str] = mapped_column(String(24), default='open', nullable=False)
     subject: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    assigned_admin_id: Mapped[int | None] = mapped_column(ForeignKey('admin_users.id', ondelete='SET NULL'))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OutstationBooking(TimestampedModel, Base):
+    __tablename__ = 'outstation_bookings'
+    __table_args__ = (
+        CheckConstraint("status IN ('requested', 'confirmed', 'driver_assigned', 'completed', 'cancelled', 'rejected')", name='ck_outstation_booking_status'),
+        Index('ix_outstation_passenger_scheduled', 'passenger_id', 'scheduled_at'),
+        Index('ix_outstation_driver_scheduled', 'driver_id', 'scheduled_at'),
+        Index('ix_outstation_status_scheduled', 'status', 'scheduled_at'),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    passenger_id: Mapped[int] = mapped_column(ForeignKey('passengers.id', ondelete='RESTRICT'), nullable=False)
+    driver_id: Mapped[int | None] = mapped_column(ForeignKey('drivers.id', ondelete='SET NULL'))
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey('vehicles.id', ondelete='SET NULL'))
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    pickup_address: Mapped[str] = mapped_column(String(512), nullable=False)
+    pickup_place_id: Mapped[str | None] = mapped_column(String(255))
+    pickup_latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    pickup_longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    destination_address: Mapped[str] = mapped_column(String(512), nullable=False)
+    destination_place_id: Mapped[str | None] = mapped_column(String(255))
+    destination_latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    destination_longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    route_geojson: Mapped[dict | None] = mapped_column(JSON)
+    preferred_vehicle_type: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(24), default='requested', nullable=False)
+    estimated_distance_km: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    estimated_fare_paise: Mapped[int | None] = mapped_column(Integer)
+    support_note: Mapped[str | None] = mapped_column(Text)
+    assigned_admin_id: Mapped[int | None] = mapped_column(ForeignKey('admin_users.id', ondelete='SET NULL'))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_reason: Mapped[str | None] = mapped_column(String(255))
 
 
 class AuditLog(Base):

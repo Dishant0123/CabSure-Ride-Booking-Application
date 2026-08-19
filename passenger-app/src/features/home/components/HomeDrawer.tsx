@@ -5,9 +5,9 @@ import { BrandMark } from '../../../components/auth/BrandMark';
 import { DsText } from '../../../components/design-system';
 import { colors, radius, shadows, spacing } from '../../../theme';
 
-export type DrawerDestination = 'home' | 'rides' | 'addresses' | 'emergency' | 'support';
+export type DrawerDestination = 'home' | 'rides' | 'addresses' | 'emergency' | 'support' | 'settings';
 type HomeDrawerProps = { visible: boolean; activeDestination: DrawerDestination; onClose: () => void; onLogout: () => void; onNavigate: (destination: DrawerDestination) => void };
-const navigationItems = [['Home', 'home', 'home'], ['My Rides', 'map-outline', 'rides'], ['Saved Addresses', 'heart', 'addresses'], ['Emergency Contacts', 'phone-plus', 'emergency'], ['Support', 'headphones', 'support']] as const;
+const navigationItems = [['Home', 'home', 'home'], ['My Rides', 'map-outline', 'rides'], ['Saved Addresses', 'heart', 'addresses'], ['Emergency Contacts', 'phone-plus', 'emergency'], ['Support', 'headphones', 'support'], ['Settings', 'cog-outline', 'settings']] as const;
 const drawerWidth = Dimensions.get('window').width * 0.8;
 
 /** Left drawer with symmetric open/close motion and state-aware menu emphasis. */

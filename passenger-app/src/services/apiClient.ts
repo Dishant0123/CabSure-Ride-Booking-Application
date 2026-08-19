@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { environment } from '../config/environment';
 
-const SESSION_KEY = '@cabapp/passenger-session';
+export const PASSENGER_SESSION_KEY = '@cabapp/passenger-session';
 
 export class ApiError extends Error {
   constructor(
@@ -47,10 +47,10 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(async (config) => {
   const headers = AxiosHeaders.from(config.headers);
-  const savedSession = await AsyncStorage.getItem(SESSION_KEY);
+  const savedSession = await AsyncStorage.getItem(PASSENGER_SESSION_KEY);
   let accessToken: string | undefined;
   try { accessToken = savedSession ? (JSON.parse(savedSession).access_token as string | undefined) : undefined; }
-  catch { await AsyncStorage.removeItem(SESSION_KEY); }
+  catch { await AsyncStorage.removeItem(PASSENGER_SESSION_KEY); }
   headers.set('Accept', 'application/json');
   headers.set('X-Request-ID', createRequestId());
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
@@ -62,7 +62,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const apiError = toApiError(error);
-    if (apiError.status === 401) await AsyncStorage.removeItem(SESSION_KEY);
+    if (apiError.status === 401) await AsyncStorage.removeItem(PASSENGER_SESSION_KEY);
     return Promise.reject(apiError);
   },
 );

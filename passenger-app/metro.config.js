@@ -35,6 +35,9 @@ module.exports = mergeConfig(config, {
   // pnpm's package targets live in the workspace-level .pnpm store.
   watchFolders: [workspaceRoot],
   resolver: {
+    // These folders contain generated native/Python cache files. Metro never
+    // needs them, and Windows may lock them while Gradle or pytest is running.
+    blockList: [/[\\/]\.pytest_cache[\\/].*/, /[\\/]\.gradle[\\/].*/, /[\\/]\.cxx[\\/].*/],
     // The first path is required when this project is opened through Z:.
     // It makes Metro inspect pnpm's real links rather than the SUBST drive.
     nodeModulesPaths: [

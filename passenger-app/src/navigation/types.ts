@@ -16,6 +16,12 @@ export type PassengerStackParamList = {
   Addresses: undefined;
   Emergency: undefined;
   Support: undefined;
+  InstantRide: undefined;
+  Outstation: undefined;
+  OutstationPickup: undefined;
+  OutstationDestination: undefined;
+  Notifications: undefined;
+  Settings: undefined;
 };
 
-export type BookingDraft = { pickup: LocationOption | null; destination: LocationOption | null; categoryId: number | null };
+export type BookingDraft = { pickup: LocationOption | null; destination: LocationOption | null; categoryId: number | null; outstationPickup: LocationOption | null; outstationDestination: LocationOption | null };

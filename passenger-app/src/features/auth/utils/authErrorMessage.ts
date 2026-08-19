@@ -9,6 +9,10 @@ export function authErrorMessage(error: unknown): string {
   if (code === 'auth/session-expired') return 'The OTP has expired. Request a new one.';
   if (code === 'auth/too-many-requests' || code === 'auth/quota-exceeded') return 'Too many OTP attempts. Please wait before trying again.';
   if (code === 'auth/network-request-failed') return 'Network error. Check your internet connection and try again.';
+  if (code === 'auth/otp-request-timeout') return 'OTP request timed out. Check the emulator internet connection and try again.';
+  if (code === 'auth/otp-verification-timeout') return 'OTP verification timed out. Use Change number, then request a fresh OTP.';
+  if (code === 'auth/token-timeout') return 'Secure sign-in took too long. Please request a fresh OTP and try again.';
+  if (code === 'auth/session-reset-timeout') return 'The previous phone session could not be reset. Close and reopen the app, then try again.';
   if (code === 'auth/operation-not-allowed') return 'Phone sign-in is disabled in Firebase. Enable it in Firebase Console.';
   if (code === 'auth/app-not-authorized') return 'Firebase cannot verify this Android app. Check its SHA-1 and SHA-256 fingerprints.';
   if (code === 'auth/captcha-check-failed') return 'Firebase app verification failed. Complete the verification and try again.';

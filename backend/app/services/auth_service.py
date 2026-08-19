@@ -1,4 +1,5 @@
 import secrets
+import logging
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -14,6 +15,7 @@ from app.schemas.auth import PassengerSignupRequest, TokenResponse
 from app.services.firebase_service import initialize_firebase
 
 password_hash = PasswordHash.recommended()
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -103,9 +105,19 @@ class AuthService:
     def _verified_firebase_identity(self, id_token: str) -> tuple[str, str]:
         initialize_firebase()
         try:
-            decoded = firebase_auth.verify_id_token(id_token)
+            decoded = firebase_auth.verify_id_token(id_token, clock_skew_seconds=60)
         except Exception as error:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Firebase could not verify this phone session.') from error
+            error_name = type(error).__name__
+            logger.warning('Firebase Passenger token verification failed: %s', error_name, exc_info=True)
+            if error_name in {'ExpiredIdTokenError', 'RevokedIdTokenError'}:
+                detail = 'Your phone verification has expired. Request a new OTP and try again.'
+            elif error_name in {'CertificateFetchError', 'UnavailableError'}:
+                detail = 'Secure sign-in is temporarily unavailable. Check your connection and try again.'
+            elif error_name == 'InvalidIdTokenError':
+                detail = 'This OTP session is no longer valid. Request a new OTP and try again.'
+            else:
+                detail = 'We could not securely verify this phone session. Request a new OTP and try again.'
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail) from error
 
         firebase_uid = decoded.get('uid')
         phone_number = decoded.get('phone_number')

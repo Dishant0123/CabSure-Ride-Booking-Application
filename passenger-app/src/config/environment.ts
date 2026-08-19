@@ -11,4 +11,5 @@ const parseTimeout = (value?: string): number => {
 export const environment = {
   apiBaseUrl: (Config.API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, ''),
   apiTimeoutMs: parseTimeout(Config.API_TIMEOUT_MS),
+  wsBaseUrl: (Config.WS_BASE_URL ?? (Config.API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/^http/, 'ws')).replace(/\/$/, ''),
 } as const;

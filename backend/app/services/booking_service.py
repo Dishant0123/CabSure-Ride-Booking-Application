@@ -1,17 +1,35 @@
 from datetime import UTC, datetime
-from math import asin, cos, radians, sin, sqrt
+from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.ride_hailing import FareLineItem, FareQuote, LocationCatalog, Ride, RideCategory, RideEvent, SavedPlace
 from app.models.user import Passenger
-from app.schemas.booking import FareItemResponse, LocationOptionResponse, RideBookingResponse, RideEstimateRequest, RideEstimateResponse
+from app.schemas.booking import FareItemResponse, LocationOptionResponse, RideBookingResponse, RideEstimateRequest, RideEstimateResponse, SelectedPlaceRequest
 from app.schemas.home import PlaceResponse
+from app.services.ride_matching_service import RideMatchingService
+from app.services.realtime_events import publish_driver_offer, publish_passenger_status
+from app.services.map_provider_service import MapProviderService
+
+
+@dataclass(frozen=True)
+class BookingLocation:
+    id: int | None
+    place_id: str | None
+    name: str
+    formatted_address: str
+    latitude: float
+    longitude: float
 
 
 class BookingService:
+    matching_service = RideMatchingService()
+    map_service = MapProviderService()
+    active_statuses = ('requested', 'searching', 'driver_assigned', 'driver_arriving', 'driver_arrived', 'in_progress')
     catalog = (
         ('IIT Dharwad', 'IIT Dharwad, Karnataka', 15.4565, 74.9690),
         ('Hubballi Railway Station', 'Railway Station Road, Hubballi, Karnataka', 15.3518, 75.1379),
@@ -19,6 +37,9 @@ class BookingService:
         ('KLE Technological University', 'BVB Campus, Hubballi, Karnataka', 15.3643, 75.1195),
         ('Urban Oasis Mall', 'Gokul Road, Hubballi, Karnataka', 15.3530, 75.1370),
     )
+    per_km_paise = {'car': 1500, 'bike': 800, 'auto': 1200}
+    night_surcharge_rate = 0.20
+    india_timezone = ZoneInfo('Asia/Kolkata')
 
     def locations(self, db: Session) -> list[LocationOptionResponse]:
         if not db.scalar(select(LocationCatalog.id).limit(1)):
@@ -31,33 +52,73 @@ class BookingService:
         category = db.get(RideCategory, request.category_id)
         if not category or not category.is_active:
             raise HTTPException(status_code=404, detail='Ride category is not available.')
-        distance_km = round(max(1.2, self._distance(pickup, destination)), 1)
-        duration = max(4, round(distance_km * 3.2))
-        distance_charge = int(distance_km * 1200)
-        fare = category.base_fare_paise + distance_charge
-        return RideEstimateResponse(pickup=self._location(pickup), destination=self._location(destination), category_name=category.display_name, distance_km=distance_km, duration_minutes=duration, fare_paise=fare, fare_items=[FareItemResponse(label='Base fare', amount_paise=category.base_fare_paise), FareItemResponse(label='Distance charge', amount_paise=distance_charge)])
+        route = self.map_service.route(
+            (pickup.latitude, pickup.longitude),
+            (destination.latitude, destination.longitude),
+        )
+        distance_km = round(max(1.2, route.distance_meters / 1000), 1)
+        duration = max(1, round(route.duration_seconds / 60))
+        per_km_rate = self.per_km_paise.get(category.code, 1200)
+        distance_charge = round(distance_km * per_km_rate)
+        subtotal = category.base_fare_paise + distance_charge
+        night_charge = round(subtotal * self.night_surcharge_rate) if self._is_night(datetime.now(self.india_timezone)) else 0
+        parking_fare = 0
+        toll_tax = route.toll_fare_paise
+        items = [
+            FareItemResponse(label='Base fare', amount_paise=category.base_fare_paise),
+            FareItemResponse(label=f'Distance fare ({distance_km:.1f} km × ₹{per_km_rate / 100:g})', amount_paise=distance_charge),
+            FareItemResponse(label='Night charge', amount_paise=night_charge),
+            FareItemResponse(label='Parking fare', amount_paise=parking_fare),
+            FareItemResponse(label='Toll tax', amount_paise=toll_tax),
+        ]
+        fare = sum(item.amount_paise for item in items)
+        return RideEstimateResponse(pickup=self._location(pickup), destination=self._location(destination), category_name=category.display_name, distance_km=distance_km, duration_minutes=duration, fare_paise=fare, fare_items=items, route_geojson=route.geometry)
 
     def book(self, db: Session, passenger: Passenger, request: RideEstimateRequest) -> RideBookingResponse:
+        active = db.scalar(select(Ride).where(
+            Ride.passenger_id == passenger.id,
+            Ride.status.in_(self.active_statuses),
+        ).order_by(Ride.requested_at.desc()))
+        if active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f'You already have an active ride (#{active.id}). End or cancel it before requesting another.',
+            )
         estimate = self.estimate(db, request)
         category = db.get(RideCategory, request.category_id)
-        ride = Ride(passenger_id=passenger.id, category_id=category.id, status='searching', pickup_address=estimate.pickup.formatted_address, pickup_latitude=estimate.pickup.latitude, pickup_longitude=estimate.pickup.longitude, destination_address=estimate.destination.formatted_address, destination_latitude=estimate.destination.latitude, destination_longitude=estimate.destination.longitude, requested_at=datetime.now(UTC), estimated_distance_meters=round(estimate.distance_km * 1000), estimated_duration_seconds=estimate.duration_minutes * 60)
-        db.add(ride); db.flush()
+        ride = Ride(passenger_id=passenger.id, category_id=category.id, status='searching', pickup_address=estimate.pickup.formatted_address, pickup_place_id=estimate.pickup.place_id, pickup_latitude=estimate.pickup.latitude, pickup_longitude=estimate.pickup.longitude, destination_address=estimate.destination.formatted_address, destination_place_id=estimate.destination.place_id, destination_latitude=estimate.destination.latitude, destination_longitude=estimate.destination.longitude, requested_at=datetime.now(UTC), estimated_distance_meters=round(estimate.distance_km * 1000), estimated_duration_seconds=estimate.duration_minutes * 60, route_geojson=estimate.route_geojson)
+        db.add(ride)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='You already have an active ride. Return to its tracking screen.') from exc
         quote = FareQuote(ride_id=ride.id, amount_paise=estimate.fare_paise, is_final=False); db.add(quote); db.flush()
         db.add_all(FareLineItem(fare_quote_id=quote.id, item_type=item.label.lower().replace(' ', '_'), amount_paise=item.amount_paise) for item in estimate.fare_items)
         db.add(RideEvent(ride_id=ride.id, actor_type='passenger', actor_id=passenger.id, event_type='ride_requested', payload={'fare_paise': estimate.fare_paise}))
+        offer = self.matching_service.dispatch(db, ride)
         db.commit(); db.refresh(ride)
-        return RideBookingResponse(ride_id=ride.id, status=ride.status, pickup_address=ride.pickup_address, destination_address=ride.destination_address, fare_paise=estimate.fare_paise, requested_at=ride.requested_at)
+        publish_passenger_status(db, ride)
+        if offer:
+            publish_driver_offer(db, offer)
+        message = 'Finding a nearby Driver for you.' if ride.status == 'searching' else 'No nearby verified Driver is available right now. Please try again shortly.'
+        return RideBookingResponse(ride_id=ride.id, status=ride.status, pickup_address=ride.pickup_address, destination_address=ride.destination_address, fare_paise=estimate.fare_paise, requested_at=ride.requested_at, message=message)
 
-    def update_saved_place(self, db: Session, passenger: Passenger, saved_place_id: int, location_id: int) -> PlaceResponse:
+    def update_saved_place(self, db: Session, passenger: Passenger, saved_place_id: int, request) -> PlaceResponse:
         saved_place = db.scalar(select(SavedPlace).where(SavedPlace.id == saved_place_id, SavedPlace.passenger_id == passenger.id))
         if not saved_place:
             raise HTTPException(status_code=404, detail='Saved place was not found.')
-        location = db.get(LocationCatalog, location_id)
-        if not location:
-            raise HTTPException(status_code=404, detail='Selected location is unavailable.')
+        if request.location:
+            location = self._selected_location(request.location)
+        else:
+            row = db.get(LocationCatalog, request.location_id)
+            if not row:
+                raise HTTPException(status_code=404, detail='Selected location is unavailable.')
+            location = self._catalog_location(row)
         saved_place.formatted_address = location.formatted_address
         saved_place.latitude = location.latitude
         saved_place.longitude = location.longitude
+        saved_place.google_place_id = location.place_id
         db.commit()
         db.refresh(saved_place)
         return PlaceResponse(
@@ -68,20 +129,37 @@ class BookingService:
             longitude=float(saved_place.longitude),
         )
 
-    def _locations_for_request(self, db: Session, request: RideEstimateRequest) -> tuple[LocationCatalog, LocationCatalog]:
-        if request.pickup_location_id == request.destination_location_id:
+    def _locations_for_request(self, db: Session, request: RideEstimateRequest) -> tuple[BookingLocation, BookingLocation]:
+        if request.pickup and request.destination:
+            pickup = self._selected_location(request.pickup)
+            destination = self._selected_location(request.destination)
+        else:
+            pickup_row = db.get(LocationCatalog, request.pickup_location_id)
+            destination_row = db.get(LocationCatalog, request.destination_location_id)
+            if not pickup_row or not destination_row:
+                raise HTTPException(status_code=404, detail='Selected location is unavailable.')
+            pickup, destination = self._catalog_location(pickup_row), self._catalog_location(destination_row)
+        if pickup.place_id == destination.place_id or (
+            abs(pickup.latitude - destination.latitude) < 0.0001
+            and abs(pickup.longitude - destination.longitude) < 0.0001
+        ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Pickup and destination must be different.')
-        pickup, destination = db.get(LocationCatalog, request.pickup_location_id), db.get(LocationCatalog, request.destination_location_id)
-        if not pickup or not destination:
-            raise HTTPException(status_code=404, detail='Selected location is unavailable.')
+        self.map_service.ensure_in_service_area(pickup.latitude, pickup.longitude)
+        self.map_service.ensure_in_service_area(destination.latitude, destination.longitude)
         return pickup, destination
 
     @staticmethod
-    def _location(item: LocationCatalog) -> LocationOptionResponse:
-        return LocationOptionResponse(id=item.id, name=item.name, formatted_address=item.formatted_address, latitude=float(item.latitude), longitude=float(item.longitude))
+    def _is_night(moment: datetime) -> bool:
+        return moment.hour >= 22 or moment.hour < 5
 
     @staticmethod
-    def _distance(a: LocationCatalog, b: LocationCatalog) -> float:
-        lat1, lon1, lat2, lon2 = map(radians, (float(a.latitude), float(a.longitude), float(b.latitude), float(b.longitude)))
-        value = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
-        return 6371 * 2 * asin(sqrt(value))
+    def _location(item: LocationCatalog | BookingLocation) -> LocationOptionResponse:
+        return LocationOptionResponse(id=item.id, place_id=getattr(item, 'place_id', None), name=item.name, formatted_address=item.formatted_address, latitude=float(item.latitude), longitude=float(item.longitude))
+
+    @staticmethod
+    def _catalog_location(item: LocationCatalog) -> BookingLocation:
+        return BookingLocation(item.id, f'catalog:{item.id}', item.name, item.formatted_address, float(item.latitude), float(item.longitude))
+
+    @staticmethod
+    def _selected_location(item: SelectedPlaceRequest) -> BookingLocation:
+        return BookingLocation(None, item.place_id, item.name, item.formatted_address, item.latitude, item.longitude)

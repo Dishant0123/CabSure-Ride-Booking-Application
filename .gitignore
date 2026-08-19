@@ -21,3 +21,10 @@ backend/secrets/
 *.egg-info/
 *.keystore
 *.jks
+*.apk
+*.idsig
+
+# Local device/emulator diagnostics
+/driver-*.png
+/passenger-*.png
+/*-ui.xml
