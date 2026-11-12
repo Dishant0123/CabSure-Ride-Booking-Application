@@ -4,7 +4,16 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATABASE_URL = f"sqlite:///{(BACKEND_ROOT / 'cabapp.db').as_posix()}"
+DEFAULT_DATABASE_URL = 'postgresql+psycopg://postgres:postgres@localhost:5432/cabsure'
+
+
+def normalize_database_url(database_url: str) -> str:
+    """Use the installed psycopg v3 driver for PostgreSQL URL aliases."""
+    if database_url.startswith('postgres://'):
+        return 'postgresql+psycopg://' + database_url.removeprefix('postgres://')
+    if database_url.startswith('postgresql://'):
+        return 'postgresql+psycopg://' + database_url.removeprefix('postgresql://')
+    return database_url
 
 
 class Settings(BaseSettings):
