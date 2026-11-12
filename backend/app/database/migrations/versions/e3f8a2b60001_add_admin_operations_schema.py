@@ -35,17 +35,19 @@ def upgrade() -> None:
     if 'ix_admin_users_email' not in {item['name'] for item in inspector.get_indexes('admin_users')}:
         op.create_index('ix_admin_users_email', 'admin_users', ['email'])
     support_columns = {column['name'] for column in inspector.get_columns('support_tickets')}
-    if 'assigned_admin_id' not in support_columns:
-        op.add_column('support_tickets', sa.Column('assigned_admin_id', sa.Integer(), sa.ForeignKey('admin_users.id', ondelete='SET NULL')))
-    if 'resolution_note' not in support_columns:
-        op.add_column('support_tickets', sa.Column('resolution_note', sa.Text()))
-    if 'resolved_at' not in support_columns:
-        op.add_column('support_tickets', sa.Column('resolved_at', sa.DateTime(timezone=True)))
+    with op.batch_alter_table('support_tickets') as batch_op:
+        if 'assigned_admin_id' not in support_columns:
+            batch_op.add_column(sa.Column('assigned_admin_id', sa.Integer(), sa.ForeignKey('admin_users.id', ondelete='SET NULL')))
+        if 'resolution_note' not in support_columns:
+            batch_op.add_column(sa.Column('resolution_note', sa.Text()))
+        if 'resolved_at' not in support_columns:
+            batch_op.add_column(sa.Column('resolved_at', sa.DateTime(timezone=True)))
 
 
 def downgrade() -> None:
-    op.drop_column('support_tickets', 'resolved_at')
-    op.drop_column('support_tickets', 'resolution_note')
-    op.drop_column('support_tickets', 'assigned_admin_id')
+    with op.batch_alter_table('support_tickets') as batch_op:
+        batch_op.drop_column('resolved_at')
+        batch_op.drop_column('resolution_note')
+        batch_op.drop_column('assigned_admin_id')
     op.drop_index('ix_admin_users_email', table_name='admin_users')
     op.drop_table('admin_users')

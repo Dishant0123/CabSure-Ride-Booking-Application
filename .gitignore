@@ -6,23 +6,55 @@ node_modules/
 **/build/
 dist/
 coverage/
-.env
-.env.*.local
+
+# Local configuration and credentials. Keep example templates versioned.
+.env*
 !.env.example
+!.env.example.md
+!.env.*.example
+backend/secrets/
+secrets/
+**/*service-account*.json
+**/*adminsdk*.json
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+*.jks
+
+# Python environments, caches, and package/build metadata
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.tox/
 .venv/
-backend/secrets/
-*.log
+venv/
+*.egg-info/
+
+# Local databases, exports, backups, and logs
 *.db
 *.sqlite
-*.egg-info/
-*.keystore
-*.jks
+*.sqlite3
+*.db-wal
+*.db-shm
+*.dump
+*.backup
+*.sql.gz
+*.log
+
+# Generated mobile binaries and local Android configuration
 *.apk
+*.aab
 *.idsig
+local.properties
+keystore.properties
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
 
 # Local device/emulator diagnostics
 /driver-*.png
